@@ -127,6 +127,7 @@ class StrmHubBridge(_PluginBase):
                                             "model": "base_url",
                                             "label": "StrmHub API 地址",
                                             "placeholder": "http://192.168.0.36:8080",
+                                            "autocomplete": "off",
                                         },
                                     }
                                 ],
@@ -146,6 +147,8 @@ class StrmHubBridge(_PluginBase):
                                             "model": "api_token",
                                             "label": "Webhook Token",
                                             "type": "password",
+                                            "placeholder": "在 StrmHub 系统 → Token 管理 中创建后粘贴",
+                                            "autocomplete": "new-password",
                                         },
                                     }
                                 ],
@@ -208,9 +211,9 @@ class StrmHubBridge(_PluginBase):
                     {
                         "component": "VAlert",
                         "props": {
-                            "type": "info",
+                            "type": "warning",
                             "variant": "tonal",
-                            "text": "直写模式：整理完即写 STRM，无需等生活事件。增量模式：调 StrmHub 生活事件增量（有延迟）。StrmHub 须配置监控目录。",
+                            "text": "勿与其他 STRM 写入插件对同一目录双开；StrmHub 侧需已配置目录映射与 115 Cookie",
                         },
                     },
                 ],
