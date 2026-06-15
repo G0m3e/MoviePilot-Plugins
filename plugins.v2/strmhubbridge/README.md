@@ -1,43 +1,26 @@
 # StrmHub 联动插件
 
-监听 MoviePilot 网盘整理完成事件，调用 StrmHub `POST /api/hooks/increment` 触发增量同步（基于 115 生活事件写 STRM）。
+## 同步模式
 
-## 前置条件
+| 模式 | 说明 |
+|------|------|
+| **直接写 STRM（推荐）** | 整理完成 → `POST /api/hooks/strm/write`，几乎实时 |
+| 触发生活事件增量 | 旧行为 → `POST /api/hooks/increment`，依赖 115 生活事件 |
 
-1. StrmHub 已配置 115 Cookie、STRM 输出路径、**增量监控目录**
-2. 115 App 已开启「最近记录 / 生活事件」
-3. MoviePilot 与 StrmHub 网络互通
+## 直写模式事件
 
-## StrmHub 侧配置
+| 事件 | 默认 | 行为 |
+|------|------|------|
+| `transfer.complete` | 开 | 每文件带 pickcode，立即写 STRM |
+| `metadata.scrape` | 关 | 整批 `file_list` 路径，短去抖后批量写（服务端解析 pickcode） |
 
-在 StrmHub 环境变量中设置专用 Webhook 密钥（推荐）：
+## StrmHub 前置条件
 
-```bash
-STRMHUB_WEBHOOK_SECRET=你的随机密钥
-```
+1. 增量页已配置并启用 **监控目录**（路径映射）
+2. 核心配置：Cookie、STRM 源站、输出路径
+3. Webhook Token：`STRMHUB_WEBHOOK_SECRET` 或管理员密码
 
-未设置时，插件可使用管理员密码或 `ADMIN_TOKEN` 作为 Bearer Token。
+## API
 
-## 插件配置
-
-| 项 | 说明 |
-|----|------|
-| StrmHub API 地址 | 如 `http://192.168.0.36:8080` |
-| Webhook Token | 与 `STRMHUB_WEBHOOK_SECRET` 一致 |
-| 去抖秒数 | 连续整理时合并为一次触发，默认 30 |
-| 触发前等待 | 等待 115 写入生活事件，默认 8 秒 |
-| metadata.scrape | **推荐开启**，整批整理完成后触发一次 |
-| transfer.complete | 默认关闭，每文件触发易叠加 405 |
-
-## 注意事项
-
-- **勿**与 p115strmhelper `transfer_monitor` 对同一目录双开写 STRM
-- StrmHub Cron 增量仍建议保留，作为无人整理时的兜底
-- 409 表示 StrmHub 已有同步任务，属正常互斥
-
-## 工作流（可选）
-
-也可不用事件监听，在 MP 工作流中：
-
-1. 触发：`metadata.scrape`
-2. 动作：调用插件 → `StrmHubBridge` → `trigger_increment`
+- `POST /api/hooks/strm/write` — 直写（本插件默认）
+- `POST /api/hooks/increment` — 增量（旧模式）
