@@ -11,6 +11,8 @@ from threading import Lock, Thread, Timer
 from time import sleep
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from app import schemas
+from app.core.config import settings
 from app.core.event import eventmanager
 from app.log import logger
 from app.plugins import _PluginBase
@@ -30,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
-    plugin_version = "1.2.0"
+    plugin_version = "1.2.1"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -95,7 +97,33 @@ class StrmHubBridge(_PluginBase):
         return []
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return []
+        return [
+            {
+                "path": "/test_notify",
+                "endpoint": self.test_notify,
+                "methods": ["GET"],
+                "summary": "发送测试通知",
+                "description": "向已配置的 MoviePilot 通知渠道发送一条测试消息",
+            }
+        ]
+
+    def test_notify(self, apikey: str = "") -> schemas.Response:
+        """
+        发送一条测试通知，用于验证 MP 通知渠道是否可用
+        """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+        try:
+            self.post_message(
+                mtype=NotificationType.Plugin,
+                title="StrmHub 测试通知",
+                text="这是一条 StrmHub 联动插件的测试通知。若通知渠道已配置，应能收到此消息。",
+                source=self.plugin_name,
+            )
+            return schemas.Response(success=True, message="测试通知已发送")
+        except Exception as exc:
+            logger.warning(f"[StrmHubBridge] 测试通知失败: {exc}")
+            return schemas.Response(success=False, message=str(exc))
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -140,7 +168,7 @@ class StrmHubBridge(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12},
+                                "props": {"cols": 12, "md": 9},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -148,12 +176,29 @@ class StrmHubBridge(_PluginBase):
                                             "model": "api_token",
                                             "label": "Webhook Token",
                                             "type": "{{ show_api_token ? 'text' : 'password' }}",
-                                            "append-inner-icon": "{{ show_api_token ? 'mdi-eye-off' : 'mdi-eye' }}",
                                             "placeholder": "在 StrmHub 系统 → Token 管理 中创建后粘贴",
                                             "autocomplete": "off",
                                         },
-                                        "events": {
-                                            "click:append-inner": "{{ show_api_token = !show_api_token }}",
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 3,
+                                    "class": "d-flex align-end",
+                                },
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "text": "{{ show_api_token ? '隐藏' : '显示' }}",
+                                        "props": {
+                                            "block": True,
+                                            "variant": "outlined",
+                                            "color": "primary",
+                                            "prepend-icon": "{{ show_api_token ? 'mdi-eye-off' : 'mdi-eye' }}",
+                                            "onclick": "{{ show_api_token = !show_api_token }}",
                                         },
                                     }
                                 ],
@@ -214,6 +259,33 @@ class StrmHubBridge(_PluginBase):
                         ],
                     },
                     {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "text": "测试通知",
+                                        "props": {
+                                            "color": "secondary",
+                                            "variant": "tonal",
+                                            "prepend-icon": "mdi-bell-ring-outline",
+                                            "block": True,
+                                        },
+                                        "events": {
+                                            "click": {
+                                                "api": f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}",
+                                                "method": "get",
+                                            }
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
                         "component": "VAlert",
                         "props": {
                             "type": "warning",
@@ -246,6 +318,34 @@ class StrmHubBridge(_PluginBase):
             {
                 "component": "VAlert",
                 "props": {"type": "info", "variant": "tonal", "text": text},
+            },
+            {
+                "component": "VRow",
+                "props": {"class": "mt-3"},
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VBtn",
+                                "text": "测试通知",
+                                "props": {
+                                    "color": "secondary",
+                                    "variant": "tonal",
+                                    "prepend-icon": "mdi-bell-ring-outline",
+                                    "block": True,
+                                },
+                                "events": {
+                                    "click": {
+                                        "api": f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}",
+                                        "method": "get",
+                                    }
+                                },
+                            }
+                        ],
+                    }
+                ],
             },
         ]
 
