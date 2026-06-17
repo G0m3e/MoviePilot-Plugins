@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from app.core.event import eventmanager
 from app.log import logger
 from app.plugins import _PluginBase
+from app.schemas import NotificationType
 from app.schemas import Event
 from app.schemas.types import EventType
 from app.schemas.workflow import ActionContext
@@ -29,7 +30,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
-    plugin_version = "1.1.0"
+    plugin_version = "1.2.0"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -126,7 +127,7 @@ class StrmHubBridge(_PluginBase):
                                         "props": {
                                             "model": "base_url",
                                             "label": "StrmHub API 地址",
-                                            "placeholder": "http://192.168.0.36:8080",
+                                            "placeholder": "http://192.168.0.36:5800",
                                             "autocomplete": "off",
                                         },
                                     }
@@ -146,9 +147,13 @@ class StrmHubBridge(_PluginBase):
                                         "props": {
                                             "model": "api_token",
                                             "label": "Webhook Token",
-                                            "type": "password",
+                                            "type": "{{ show_api_token ? 'text' : 'password' }}",
+                                            "append-inner-icon": "{{ show_api_token ? 'mdi-eye-off' : 'mdi-eye' }}",
                                             "placeholder": "在 StrmHub 系统 → Token 管理 中创建后粘贴",
-                                            "autocomplete": "new-password",
+                                            "autocomplete": "off",
+                                        },
+                                        "events": {
+                                            "click:append-inner": "{{ show_api_token = !show_api_token }}",
                                         },
                                     }
                                 ],
@@ -222,6 +227,7 @@ class StrmHubBridge(_PluginBase):
             "enabled": False,
             "base_url": "",
             "api_token": "",
+            "show_api_token": True,
             "sync_mode": "direct",
             "listen_transfer_complete": True,
             "listen_metadata_scrape": False,
@@ -378,6 +384,26 @@ class StrmHubBridge(_PluginBase):
             "Content-Type": "application/json",
         }
 
+    def _notify_strm_result(
+        self, *, ok: bool, source: str, summary: str, detail: str = ""
+    ) -> None:
+        """
+        直写 STRM 完成后向 MoviePilot 通知渠道推送结果（成功或失败均发送）
+        """
+        title = "StrmHub STRM 生成成功" if ok else "StrmHub STRM 生成失败"
+        text = summary
+        if detail:
+            text = f"{summary}\n{detail[:400]}"
+        try:
+            self.post_message(
+                mtype=NotificationType.Plugin,
+                title=title,
+                text=text,
+                source=self.plugin_name,
+            )
+        except Exception as exc:
+            logger.warning(f"[StrmHubBridge] 发送 MP 通知失败: {exc}")
+
     def _post_strm_write(self, files: List[dict], source: str) -> None:
         base = (self._base_url or "").rstrip("/")
         if not base or not self._api_token:
@@ -399,17 +425,27 @@ class StrmHubBridge(_PluginBase):
                     f"写 STRM: 生成={data.get('created', 0)} "
                     f"跳过={data.get('skipped', 0)} 失败={data.get('failed', 0)}"
                 )
+                failed = int(data.get("failed") or 0)
+                ok = failed == 0
+                if failed > 0 and int(data.get("created") or 0) > 0:
+                    summary = f"{summary}（部分失败）"
                 self._last_status = summary
                 self.save_data(
                     "last_trigger",
                     {
-                        "status": "ok",
+                        "status": "ok" if ok else "failed",
                         "source": source,
                         "summary": summary,
                         "detail": detail[:500],
                     },
                 )
                 logger.info(f"[StrmHubBridge] {summary}")
+                self._notify_strm_result(
+                    ok=ok,
+                    source=source,
+                    summary=summary,
+                    detail=detail[:400],
+                )
                 return
             except Exception as exc:
                 last_error = str(exc)
@@ -421,6 +457,12 @@ class StrmHubBridge(_PluginBase):
             {"status": "failed", "source": source, "detail": last_error},
         )
         logger.error(f"[StrmHubBridge] 直写 STRM 失败: {last_error}")
+        self._notify_strm_result(
+            ok=False,
+            source=source,
+            summary=self._last_status,
+            detail=last_error,
+        )
 
     def _post_increment(self, source: str) -> None:
         base = (self._base_url or "").rstrip("/")
