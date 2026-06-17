@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
-    plugin_version = "1.2.1"
+    plugin_version = "1.2.2"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -125,6 +125,19 @@ class StrmHubBridge(_PluginBase):
             logger.warning(f"[StrmHubBridge] 测试通知失败: {exc}")
             return schemas.Response(success=False, message=str(exc))
 
+    def _form_test_notify_onclick(self) -> str:
+        """
+        配置页测试通知按钮：FormRender 仅支持 props 内 on* 函数字符串，不支持 events
+        """
+        return (
+            "function() { "
+            f"fetch('/api/v1/plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}')"
+            ".then(function(r) { return r.json(); })"
+            ".then(function(d) { window.alert(d.message || (d.success ? '测试通知已发送' : '发送失败')); })"
+            ".catch(function(e) { window.alert('请求失败: ' + String(e)); }); "
+            "}"
+        )
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         配置页
@@ -168,7 +181,7 @@ class StrmHubBridge(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 9},
+                                "props": {"cols": 12},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -176,29 +189,10 @@ class StrmHubBridge(_PluginBase):
                                             "model": "api_token",
                                             "label": "Webhook Token",
                                             "type": "{{ show_api_token ? 'text' : 'password' }}",
+                                            "append-inner-icon": "{{ show_api_token ? 'mdi-eye-off' : 'mdi-eye' }}",
                                             "placeholder": "在 StrmHub 系统 → Token 管理 中创建后粘贴",
                                             "autocomplete": "off",
-                                        },
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 3,
-                                    "class": "d-flex align-end",
-                                },
-                                "content": [
-                                    {
-                                        "component": "VBtn",
-                                        "text": "{{ show_api_token ? '隐藏' : '显示' }}",
-                                        "props": {
-                                            "block": True,
-                                            "variant": "outlined",
-                                            "color": "primary",
-                                            "prepend-icon": "{{ show_api_token ? 'mdi-eye-off' : 'mdi-eye' }}",
-                                            "onclick": "{{ show_api_token = !show_api_token }}",
+                                            "onClick:appendInner": "function() { show_api_token = !show_api_token }",
                                         },
                                     }
                                 ],
@@ -273,12 +267,7 @@ class StrmHubBridge(_PluginBase):
                                             "variant": "tonal",
                                             "prepend-icon": "mdi-bell-ring-outline",
                                             "block": True,
-                                        },
-                                        "events": {
-                                            "click": {
-                                                "api": f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}",
-                                                "method": "get",
-                                            }
+                                            "onclick": self._form_test_notify_onclick(),
                                         },
                                     }
                                 ],
