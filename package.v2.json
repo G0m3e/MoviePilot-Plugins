@@ -4,7 +4,7 @@
         "description": "MoviePilot 整理完成后直接写 STRM 或触发 StrmHub 增量同步",
         "labels": "整理,STRM,115",
         "version": "1.2.3",
-        "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png",
+        "icon": "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png",
         "author": "G0m3e",
         "level": 1,
         "system_version": ">=2.12.0",

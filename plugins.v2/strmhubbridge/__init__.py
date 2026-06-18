@@ -31,7 +31,7 @@ class StrmHubBridge(_PluginBase):
 
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
-    plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
+    plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png"
     plugin_version = "1.2.3"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
