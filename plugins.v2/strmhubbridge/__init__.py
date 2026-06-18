@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png"
-    plugin_version = "1.2.3"
+    plugin_version = "1.2.4"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -113,22 +113,34 @@ class StrmHubBridge(_PluginBase):
         """
         if apikey != settings.API_TOKEN:
             return schemas.Response(success=False, message="API密钥错误")
+        Thread(target=self._send_test_notify, daemon=True).start()
+        return schemas.Response(success=True, message="测试通知已发送")
+
+    def _send_test_notify(self) -> None:
+        """
+        后台发送测试通知，避免阻塞详情页 API 导致「正在处理」弹窗无法关闭
+        """
         try:
             self.post_message(
                 mtype=NotificationType.Plugin,
                 title="StrmHub 测试通知",
                 text="这是一条 StrmHub 联动插件的测试通知。若通知渠道已配置，应能收到此消息。",
             )
-            return schemas.Response(success=True, message="测试通知已发送")
         except Exception as exc:
             logger.warning(f"[StrmHubBridge] 测试通知失败: {exc}")
-            return schemas.Response(success=False, message=str(exc))
 
-    def _test_notify_api(self) -> str:
+    @staticmethod
+    def _test_notify_click_event() -> Dict[str, Any]:
         """
-        测试通知 API 路径（供配置页/数据页按钮调用）
+        详情页测试通知按钮事件（与豆瓣想看等插件一致，apikey 走 params）
         """
-        return f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}"
+        return {
+            "api": "plugin/StrmHubBridge/test_notify",
+            "method": "get",
+            "params": {
+                "apikey": settings.API_TOKEN,
+            },
+        }
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -245,38 +257,11 @@ class StrmHubBridge(_PluginBase):
                         ],
                     },
                     {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [
-                                    {
-                                        "component": "VBtn",
-                                        "text": "测试通知",
-                                        "props": {
-                                            "color": "secondary",
-                                            "variant": "tonal",
-                                            "prepend-icon": "mdi-bell-ring-outline",
-                                            "block": True,
-                                        },
-                                        "events": {
-                                            "click": {
-                                                "api": self._test_notify_api(),
-                                                "method": "get",
-                                            }
-                                        },
-                                    }
-                                ],
-                            },
-                        ],
-                    },
-                    {
                         "component": "VAlert",
                         "props": {
                             "type": "info",
                             "variant": "tonal",
-                            "text": "iOS 请用主屏幕 PWA 打开；若配置页按钮无反应，请点右下角「查看数据」再测。",
+                            "text": "iOS 请用主屏幕 PWA 打开；测试通知请点右下角「查看数据」。",
                         },
                     },
                     {
@@ -331,10 +316,7 @@ class StrmHubBridge(_PluginBase):
                                     "block": True,
                                 },
                                 "events": {
-                                    "click": {
-                                        "api": self._test_notify_api(),
-                                        "method": "get",
-                                    }
+                                    "click": self._test_notify_click_event(),
                                 },
                             }
                         ],
