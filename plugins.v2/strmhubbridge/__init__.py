@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/cloud.png"
-    plugin_version = "1.2.2"
+    plugin_version = "1.2.3"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -118,25 +118,17 @@ class StrmHubBridge(_PluginBase):
                 mtype=NotificationType.Plugin,
                 title="StrmHub 测试通知",
                 text="这是一条 StrmHub 联动插件的测试通知。若通知渠道已配置，应能收到此消息。",
-                source=self.plugin_name,
             )
             return schemas.Response(success=True, message="测试通知已发送")
         except Exception as exc:
             logger.warning(f"[StrmHubBridge] 测试通知失败: {exc}")
             return schemas.Response(success=False, message=str(exc))
 
-    def _form_test_notify_onclick(self) -> str:
+    def _test_notify_api(self) -> str:
         """
-        配置页测试通知按钮：FormRender 仅支持 props 内 on* 函数字符串，不支持 events
+        测试通知 API 路径（供配置页/数据页按钮调用）
         """
-        return (
-            "function() { "
-            f"fetch('/api/v1/plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}')"
-            ".then(function(r) { return r.json(); })"
-            ".then(function(d) { window.alert(d.message || (d.success ? '测试通知已发送' : '发送失败')); })"
-            ".catch(function(e) { window.alert('请求失败: ' + String(e)); }); "
-            "}"
-        )
+        return f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}"
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -267,12 +259,25 @@ class StrmHubBridge(_PluginBase):
                                             "variant": "tonal",
                                             "prepend-icon": "mdi-bell-ring-outline",
                                             "block": True,
-                                            "onclick": self._form_test_notify_onclick(),
+                                        },
+                                        "events": {
+                                            "click": {
+                                                "api": self._test_notify_api(),
+                                                "method": "get",
+                                            }
                                         },
                                     }
                                 ],
                             },
                         ],
+                    },
+                    {
+                        "component": "VAlert",
+                        "props": {
+                            "type": "info",
+                            "variant": "tonal",
+                            "text": "iOS 请用主屏幕 PWA 打开；若配置页按钮无反应，请点右下角「查看数据」再测。",
+                        },
                     },
                     {
                         "component": "VAlert",
@@ -327,7 +332,7 @@ class StrmHubBridge(_PluginBase):
                                 },
                                 "events": {
                                     "click": {
-                                        "api": f"plugin/StrmHubBridge/test_notify?apikey={settings.API_TOKEN}",
+                                        "api": self._test_notify_api(),
                                         "method": "get",
                                     }
                                 },
@@ -488,7 +493,6 @@ class StrmHubBridge(_PluginBase):
                 mtype=NotificationType.Plugin,
                 title=title,
                 text=text,
-                source=self.plugin_name,
             )
         except Exception as exc:
             logger.warning(f"[StrmHubBridge] 发送 MP 通知失败: {exc}")
