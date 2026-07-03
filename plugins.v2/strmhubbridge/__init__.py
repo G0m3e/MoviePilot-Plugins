@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png"
-    plugin_version = "1.2.5"
+    plugin_version = "1.2.6"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -45,7 +45,7 @@ class StrmHubBridge(_PluginBase):
     _sync_mode = "direct"
     _debounce_seconds = 30
     _batch_debounce_seconds = 5
-    _event_delay_seconds = 0
+    _event_delay_seconds = 10
     _listen_metadata_scrape = False
     _listen_transfer_complete = True
     _last_status = "尚未触发"
@@ -67,7 +67,10 @@ class StrmHubBridge(_PluginBase):
         self._sync_mode = mode if mode in {"direct", "increment"} else "direct"
         self._debounce_seconds = max(int(config.get("debounce_seconds") or 30), 5)
         self._batch_debounce_seconds = max(int(config.get("batch_debounce_seconds") or 5), 1)
-        self._event_delay_seconds = max(int(config.get("event_delay_seconds") or 0), 0)
+        delay_raw = config.get("event_delay_seconds")
+        self._event_delay_seconds = max(
+            int(delay_raw if delay_raw is not None else 10), 0
+        )
         self._listen_metadata_scrape = bool(config.get("listen_metadata_scrape", False))
         self._listen_transfer_complete = bool(config.get("listen_transfer_complete", True))
         if self._sync_mode == "increment":
@@ -77,7 +80,6 @@ class StrmHubBridge(_PluginBase):
             self._listen_transfer_complete = bool(
                 config.get("listen_transfer_complete", False)
             )
-            self._event_delay_seconds = max(int(config.get("event_delay_seconds") or 8), 0)
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
             self._last_status = saved.get("summary") or f"最近成功 ({saved.get('source', '')})"
@@ -236,7 +238,7 @@ class StrmHubBridge(_PluginBase):
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "listen_transfer_complete",
-                                            "label": "监听 transfer.complete（直写模式推荐）",
+                                            "label": "监听 transfer.complete（单文件整理完成）",
                                         },
                                     }
                                 ],
@@ -249,7 +251,57 @@ class StrmHubBridge(_PluginBase):
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "listen_metadata_scrape",
-                                            "label": "监听 metadata.scrape（整批路径）",
+                                            "label": "监听 metadata.scrape（整批刮削完成）",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "event_delay_seconds",
+                                            "label": "事件延时（秒）",
+                                            "type": "number",
+                                            "placeholder": "收到 MP 事件后延迟再调 Webhook，默认 10",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "debounce_seconds",
+                                            "label": "增量去抖（秒）",
+                                            "type": "number",
+                                            "placeholder": "增量模式合并触发，默认 30",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "batch_debounce_seconds",
+                                            "label": "批写入去抖（秒）",
+                                            "type": "number",
+                                            "placeholder": "直写批路径合并，默认 5",
                                         },
                                     }
                                 ],
@@ -284,7 +336,7 @@ class StrmHubBridge(_PluginBase):
             "listen_metadata_scrape": False,
             "debounce_seconds": 30,
             "batch_debounce_seconds": 5,
-            "event_delay_seconds": 0,
+            "event_delay_seconds": 10,
         }
 
     def get_page(self) -> List[dict]:
@@ -479,10 +531,17 @@ class StrmHubBridge(_PluginBase):
         except Exception as exc:
             logger.warning(f"[StrmHubBridge] 发送 MP 通知失败: {exc}")
 
+    def _apply_event_delay(self) -> None:
+        delay = max(int(self._event_delay_seconds or 0), 0)
+        if delay:
+            logger.info(f"[StrmHubBridge] 事件延时 {delay}s 后调用 Webhook")
+            sleep(delay)
+
     def _post_strm_write(self, files: List[dict], source: str) -> None:
         base = (self._base_url or "").rstrip("/")
         if not base or not self._api_token:
             return
+        self._apply_event_delay()
         url = f"{base}/api/hooks/strm/write"
         body = json.dumps(
             {"source": source, "files": files, "resolve_pickcode": True}
@@ -543,9 +602,7 @@ class StrmHubBridge(_PluginBase):
         base = (self._base_url or "").rstrip("/")
         if not base or not self._api_token:
             return
-        delay = max(int(self._event_delay_seconds or 0), 0)
-        if delay:
-            sleep(delay)
+        self._apply_event_delay()
         url = f"{base}/api/hooks/increment"
         body = json.dumps({"source": source}).encode("utf-8")
         last_error = ""

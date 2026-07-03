@@ -20,9 +20,11 @@
 | StrmHub API 地址 | 如 `http://192.168.0.36:5800` |
 | Webhook Token | 与 Token 管理中创建的值一致 |
 | 同步模式 | **直接写 STRM**（推荐）或触发生活事件增量 |
-| 去抖秒数 | 连续整理时合并触发，默认 30 |
-| metadata.scrape | 整批整理完成后触发（推荐开启） |
-| transfer.complete | 每文件触发，默认按插件配置 |
+| 事件延时（秒） | 收到 MP 事件后延迟再调 Webhook，默认 10 |
+| 增量去抖秒数 | 增量模式连续事件合并触发，默认 30 |
+| 批写入去抖秒数 | 直写模式 metadata.scrape 路径合并，默认 5 |
+| metadata.scrape | 整批整理+刮削完成后触发一次（含路径列表） |
+| transfer.complete | 每个文件整理到网盘完成时触发一次 |
 
 ## 注意事项
 
