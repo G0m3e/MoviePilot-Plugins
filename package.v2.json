@@ -1,14 +1,15 @@
 {
     "StrmHubBridge": {
         "name": "StrmHub 联动",
-        "description": "MoviePilot 整理完成后直接写 STRM 或触发 StrmHub 增量同步",
+        "description": "MoviePilot 整理完成后直接写 STRM",
         "labels": "整理,STRM,115",
-        "version": "1.2.8",
+        "version": "1.3.0",
         "icon": "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2",
         "author": "G0m3e",
         "level": 1,
         "system_version": ">=2.12.0",
         "history": {
+            "v1.3.0": "移除同步模式与生活事件增量，仅保留直接写 STRM；废弃工作流 trigger_increment 动作",
             "v1.2.8": "图标 URL 增加 ?v=2 破除 MP/浏览器对旧 cloud 图标的缓存",
             "v1.2.7": "直写 STRM 完成后的 MP 通知改为配置开关，默认关闭；测试通知按钮不受影响",
             "v1.2.6": "配置页增加事件延时（默认 10s），直写/增量 Webhook 调用前均生效",

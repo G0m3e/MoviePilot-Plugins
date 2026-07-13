@@ -1,11 +1,10 @@
 """
-StrmHub 联动：MoviePilot 整理完成后直接写 STRM 或触发增量同步
+StrmHub 联动：MoviePilot 整理完成后直接写 STRM
 """
 
 from __future__ import annotations
 
 import json
-import urllib.error
 import urllib.request
 from threading import Lock, Thread, Timer
 from time import sleep
@@ -19,20 +18,19 @@ from app.plugins import _PluginBase
 from app.schemas import NotificationType
 from app.schemas import Event
 from app.schemas.types import EventType
-from app.schemas.workflow import ActionContext
 
 _ALLOWED_STORAGES = frozenset({"u115", "115网盘Plus"})
 
 
 class StrmHubBridge(_PluginBase):
     """
-    MoviePilot 整理完成后调用 StrmHub 写 STRM 或触发增量
+    MoviePilot 整理完成后调用 StrmHub 直接写 STRM
     """
 
     plugin_name = "StrmHub 联动"
-    plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
+    plugin_desc = "整理完成后调用 StrmHub 直接写 STRM"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2"
-    plugin_version = "1.2.8"
+    plugin_version = "1.3.0"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -42,15 +40,12 @@ class StrmHubBridge(_PluginBase):
     _enabled = False
     _base_url = ""
     _api_token = ""
-    _sync_mode = "direct"
-    _debounce_seconds = 30
     _batch_debounce_seconds = 5
     _event_delay_seconds = 10
     _listen_metadata_scrape = False
     _listen_transfer_complete = True
     _notify_on_strm_result = False
     _last_status = "尚未触发"
-    _debounce_timer: Optional[Timer] = None
     _batch_timer: Optional[Timer] = None
     _debounce_lock = Lock()
     _pending_source = "mp.metadata_scrape"
@@ -64,9 +59,6 @@ class StrmHubBridge(_PluginBase):
         self._enabled = bool(config.get("enabled"))
         self._base_url = (config.get("base_url") or "").strip().rstrip("/")
         self._api_token = (config.get("api_token") or "").strip()
-        mode = (config.get("sync_mode") or "direct").strip().lower()
-        self._sync_mode = mode if mode in {"direct", "increment"} else "direct"
-        self._debounce_seconds = max(int(config.get("debounce_seconds") or 30), 5)
         self._batch_debounce_seconds = max(int(config.get("batch_debounce_seconds") or 5), 1)
         delay_raw = config.get("event_delay_seconds")
         self._event_delay_seconds = max(
@@ -75,18 +67,9 @@ class StrmHubBridge(_PluginBase):
         self._listen_metadata_scrape = bool(config.get("listen_metadata_scrape", False))
         self._listen_transfer_complete = bool(config.get("listen_transfer_complete", True))
         self._notify_on_strm_result = bool(config.get("notify_on_strm_result", False))
-        if self._sync_mode == "increment":
-            self._listen_metadata_scrape = bool(
-                config.get("listen_metadata_scrape", True)
-            )
-            self._listen_transfer_complete = bool(
-                config.get("listen_transfer_complete", False)
-            )
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
             self._last_status = saved.get("summary") or f"最近成功 ({saved.get('source', '')})"
-        elif saved.get("status") == "skipped":
-            self._last_status = "最近跳过 (409)"
         elif saved.get("status") == "failed":
             self._last_status = "最近失败"
 
@@ -215,28 +198,6 @@ class StrmHubBridge(_PluginBase):
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
-                                        "component": "VSelect",
-                                        "props": {
-                                            "model": "sync_mode",
-                                            "label": "同步模式",
-                                            "items": [
-                                                {"title": "直接写 STRM（推荐）", "value": "direct"},
-                                                {"title": "触发生活事件增量", "value": "increment"},
-                                            ],
-                                        },
-                                    }
-                                ],
-                            },
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [
-                                    {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "notify_on_strm_result",
@@ -283,7 +244,7 @@ class StrmHubBridge(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -298,22 +259,7 @@ class StrmHubBridge(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [
-                                    {
-                                        "component": "VTextField",
-                                        "props": {
-                                            "model": "debounce_seconds",
-                                            "label": "增量去抖（秒）",
-                                            "type": "number",
-                                            "placeholder": "增量模式合并触发，默认 30",
-                                        },
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -321,7 +267,7 @@ class StrmHubBridge(_PluginBase):
                                             "model": "batch_debounce_seconds",
                                             "label": "批写入去抖（秒）",
                                             "type": "number",
-                                            "placeholder": "直写批路径合并，默认 5",
+                                            "placeholder": "metadata.scrape 路径合并，默认 5",
                                         },
                                     }
                                 ],
@@ -351,11 +297,9 @@ class StrmHubBridge(_PluginBase):
             "base_url": "",
             "api_token": "",
             "show_api_token": True,
-            "sync_mode": "direct",
             "notify_on_strm_result": False,
             "listen_transfer_complete": True,
             "listen_metadata_scrape": False,
-            "debounce_seconds": 30,
             "batch_debounce_seconds": 5,
             "event_delay_seconds": 10,
         }
@@ -398,27 +342,9 @@ class StrmHubBridge(_PluginBase):
             },
         ]
 
-    def get_actions(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "id": "trigger_increment",
-                "action_id": "trigger_increment",
-                "name": "触发 StrmHub 增量",
-                "func": self.run_workflow_action,
-                "kwargs": {"source": "mp.action"},
-            }
-        ]
-
-    def run_workflow_action(
-        self, context: ActionContext, source: str = "mp.action", **_
-    ) -> Tuple[bool, ActionContext]:
-        if not self.get_state():
-            return False, context
-        if self._sync_mode == "direct":
-            logger.warning("[StrmHubBridge] 工作流动作在直写模式下请使用整理事件触发")
-            return False, context
-        self._schedule_increment(source)
-        return True, context
+    @staticmethod
+    def get_actions() -> List[Dict[str, Any]]:
+        return []
 
     @eventmanager.register(EventType.MetadataScrape)
     def on_metadata_scrape(self, event: Event):
@@ -427,10 +353,7 @@ class StrmHubBridge(_PluginBase):
         paths = self._paths_from_scrape_event(event)
         if not paths:
             return
-        if self._sync_mode == "direct":
-            self._schedule_batch_write(paths, "mp.metadata_scrape")
-        else:
-            self._schedule_increment("mp.metadata_scrape")
+        self._schedule_batch_write(paths, "mp.metadata_scrape")
 
     @eventmanager.register(EventType.TransferComplete)
     def on_transfer_complete(self, event: Event):
@@ -439,14 +362,11 @@ class StrmHubBridge(_PluginBase):
         file_item = self._file_from_transfer_event(event)
         if not file_item:
             return
-        if self._sync_mode == "direct":
-            Thread(
-                target=self._post_strm_write,
-                args=([file_item], "mp.transfer_complete"),
-                daemon=True,
-            ).start()
-        else:
-            self._schedule_increment("mp.transfer_complete")
+        Thread(
+            target=self._post_strm_write,
+            args=([file_item], "mp.transfer_complete"),
+            daemon=True,
+        ).start()
 
     @staticmethod
     def _file_from_transfer_event(event: Event) -> Optional[dict]:
@@ -507,25 +427,6 @@ class StrmHubBridge(_PluginBase):
             return
         files = [{"pan_path": p} for p in paths]
         Thread(target=self._post_strm_write, args=(files, source), daemon=True).start()
-
-    def _schedule_increment(self, source: str) -> None:
-        with self._debounce_lock:
-            self._pending_source = source
-            if self._debounce_timer:
-                self._debounce_timer.cancel()
-            self._debounce_timer = Timer(
-                float(self._debounce_seconds),
-                self._on_increment_fire,
-            )
-            self._debounce_timer.daemon = True
-            self._debounce_timer.start()
-        logger.info(
-            f"[StrmHubBridge] 已调度 StrmHub 增量 ({source})，{self._debounce_seconds}s 后执行"
-        )
-
-    def _on_increment_fire(self) -> None:
-        source = self._pending_source
-        Thread(target=self._post_increment, args=(source,), daemon=True).start()
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -621,53 +522,8 @@ class StrmHubBridge(_PluginBase):
             detail=last_error,
         )
 
-    def _post_increment(self, source: str) -> None:
-        base = (self._base_url or "").rstrip("/")
-        if not base or not self._api_token:
-            return
-        self._apply_event_delay()
-        url = f"{base}/api/hooks/increment"
-        body = json.dumps({"source": source}).encode("utf-8")
-        last_error = ""
-        for attempt in range(1, 4):
-            try:
-                req = urllib.request.Request(
-                    url, data=body, headers=self._headers(), method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    detail = resp.read().decode("utf-8", errors="replace")[:500]
-                self._last_status = f"增量触发成功 ({source})"
-                self.save_data(
-                    "last_trigger",
-                    {"status": "ok", "source": source, "detail": detail},
-                )
-                logger.info(f"[StrmHubBridge] 已触发 StrmHub 增量: {source}")
-                return
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                if exc.code == 409:
-                    self._last_status = "跳过 (409 已有任务)"
-                    self.save_data(
-                        "last_trigger",
-                        {"status": "skipped", "source": source, "detail": detail},
-                    )
-                    return
-                last_error = f"HTTP {exc.code}: {detail}"
-            except Exception as exc:
-                last_error = str(exc)
-            if attempt < 3:
-                sleep(3)
-        self._last_status = f"增量失败: {last_error[:120]}"
-        self.save_data(
-            "last_trigger",
-            {"status": "failed", "source": source, "detail": last_error},
-        )
-        logger.error(f"[StrmHubBridge] 触发增量失败: {last_error}")
-
     def stop_service(self):
         with self._debounce_lock:
-            for timer in (self._debounce_timer, self._batch_timer):
-                if timer:
-                    timer.cancel()
-            self._debounce_timer = None
+            if self._batch_timer:
+                self._batch_timer.cancel()
             self._batch_timer = None
