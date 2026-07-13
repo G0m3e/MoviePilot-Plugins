@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM（推荐）或触发增量同步"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png"
-    plugin_version = "1.2.6"
+    plugin_version = "1.2.7"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -48,6 +48,7 @@ class StrmHubBridge(_PluginBase):
     _event_delay_seconds = 10
     _listen_metadata_scrape = False
     _listen_transfer_complete = True
+    _notify_on_strm_result = False
     _last_status = "尚未触发"
     _debounce_timer: Optional[Timer] = None
     _batch_timer: Optional[Timer] = None
@@ -73,6 +74,7 @@ class StrmHubBridge(_PluginBase):
         )
         self._listen_metadata_scrape = bool(config.get("listen_metadata_scrape", False))
         self._listen_transfer_complete = bool(config.get("listen_transfer_complete", True))
+        self._notify_on_strm_result = bool(config.get("notify_on_strm_result", False))
         if self._sync_mode == "increment":
             self._listen_metadata_scrape = bool(
                 config.get("listen_metadata_scrape", True)
@@ -237,6 +239,24 @@ class StrmHubBridge(_PluginBase):
                                     {
                                         "component": "VSwitch",
                                         "props": {
+                                            "model": "notify_on_strm_result",
+                                            "label": "直写 STRM 完成后推送 MP 通知",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
                                             "model": "listen_transfer_complete",
                                             "label": "监听 transfer.complete（单文件整理完成）",
                                         },
@@ -332,6 +352,7 @@ class StrmHubBridge(_PluginBase):
             "api_token": "",
             "show_api_token": True,
             "sync_mode": "direct",
+            "notify_on_strm_result": False,
             "listen_transfer_complete": True,
             "listen_metadata_scrape": False,
             "debounce_seconds": 30,
@@ -516,8 +537,10 @@ class StrmHubBridge(_PluginBase):
         self, *, ok: bool, source: str, summary: str, detail: str = ""
     ) -> None:
         """
-        直写 STRM 完成后向 MoviePilot 通知渠道推送结果（成功或失败均发送）
+        直写 STRM 完成后向 MoviePilot 通知渠道推送结果（成功或失败均发送，需开启配置）
         """
+        if not self._notify_on_strm_result:
+            return
         title = "StrmHub STRM 生成成功" if ok else "StrmHub STRM 生成失败"
         text = summary
         if detail:
