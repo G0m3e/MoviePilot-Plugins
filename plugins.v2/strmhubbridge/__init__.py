@@ -18,6 +18,7 @@ from app.plugins import _PluginBase
 from app.schemas import NotificationType
 from app.schemas import Event
 from app.schemas.types import EventType
+from .paths import map_strmhub_path_to_mp, parse_path_mappings
 from .scrape import media_scrape_metadata
 
 _ALLOWED_STORAGES = frozenset({"u115", "115网盘Plus"})
@@ -31,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2"
-    plugin_version = "1.4.1"
+    plugin_version = "1.4.2"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -46,6 +47,7 @@ class StrmHubBridge(_PluginBase):
     _listen_mode = "single_file"
     _notify_on_strm_result = False
     _scrape_metadata_after_strm = True
+    _path_mappings: List[Tuple[str, str]] = []
     _last_status = "尚未触发"
     _batch_timer: Optional[Timer] = None
     _debounce_lock = Lock()
@@ -70,6 +72,7 @@ class StrmHubBridge(_PluginBase):
         self._scrape_metadata_after_strm = bool(
             config.get("scrape_metadata_after_strm", True)
         )
+        self._path_mappings = parse_path_mappings(config.get("path_mappings") or "")
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
             self._last_status = saved.get("summary") or f"最近成功 ({saved.get('source', '')})"
@@ -254,6 +257,29 @@ class StrmHubBridge(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextarea",
+                                        "props": {
+                                            "model": "path_mappings",
+                                            "label": "目录映射",
+                                            "rows": 3,
+                                            "auto-grow": True,
+                                            "placeholder": "/media/strmhub:/media/strm",
+                                            "hint": "格式：MoviePilot目录:StrmHub目录，每行一条，可多行；用于将 Webhook 返回的 strm 路径转为 MP 可访问路径（刮削）",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
@@ -311,6 +337,7 @@ class StrmHubBridge(_PluginBase):
             "show_api_token": True,
             "notify_on_strm_result": False,
             "scrape_metadata_after_strm": True,
+            "path_mappings": "",
             "listen_mode": "single_file",
             "batch_debounce_seconds": 5,
             "event_delay_seconds": 10,
@@ -509,9 +536,14 @@ class StrmHubBridge(_PluginBase):
             if not strm_path:
                 skip_count += 1
                 continue
+            scrape_path = map_strmhub_path_to_mp(strm_path, self._path_mappings)
+            if scrape_path != strm_path:
+                logger.info(
+                    f"[StrmHubBridge] 路径映射: {strm_path} -> {scrape_path}"
+                )
             try:
                 if media_scrape_metadata(
-                    path=strm_path,
+                    path=scrape_path,
                     mediainfo=mediainfo,
                     meta=meta,
                 ):
@@ -521,7 +553,7 @@ class StrmHubBridge(_PluginBase):
             except Exception as exc:
                 skip_count += 1
                 logger.warning(
-                    f"[StrmHubBridge] 刮削失败 {strm_path}: {exc}"
+                    f"[StrmHubBridge] 刮削失败 {scrape_path}: {exc}"
                 )
         if ok_count or skip_count:
             logger.info(
