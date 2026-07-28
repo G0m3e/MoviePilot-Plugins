@@ -8,6 +8,7 @@ import json
 import urllib.request
 from threading import Lock, Thread, Timer
 from time import sleep
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app import schemas
@@ -18,6 +19,9 @@ from app.plugins import _PluginBase
 from app.schemas import NotificationType
 from app.schemas import Event
 from app.schemas.types import EventType
+from app.helper.mediaserver import MediaServerHelper
+
+from .mediaserver_refresh import MediaServerRefresh
 from .paths import map_strmhub_path_to_mp, parse_path_mappings
 from .scrape import media_scrape_metadata
 
@@ -32,7 +36,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2"
-    plugin_version = "1.4.3"
+    plugin_version = "1.5.0"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -48,6 +52,10 @@ class StrmHubBridge(_PluginBase):
     _notify_on_strm_result = False
     _scrape_metadata_after_strm = True
     _scrape_overwrite = True
+    _media_server_refresh_enabled = False
+    _media_server_refresh_delay = 5
+    _mediaservers: List[str] = []
+    _mp_mediaserver_paths = ""
     _path_mappings: List[Tuple[str, str]] = []
     _last_status = "尚未触发"
     _batch_timer: Optional[Timer] = None
@@ -74,6 +82,17 @@ class StrmHubBridge(_PluginBase):
             config.get("scrape_metadata_after_strm", True)
         )
         self._scrape_overwrite = bool(config.get("scrape_overwrite", True))
+        self._media_server_refresh_enabled = bool(
+            config.get("media_server_refresh_enabled", False)
+        )
+        self._media_server_refresh_delay = max(
+            int(config.get("media_server_refresh_delay") or 5), 0
+        )
+        raw_servers = config.get("mediaservers") or []
+        if isinstance(raw_servers, str):
+            raw_servers = [s.strip() for s in raw_servers.split(",") if s.strip()]
+        self._mediaservers = [str(s).strip() for s in raw_servers if str(s).strip()]
+        self._mp_mediaserver_paths = str(config.get("mp_mediaserver_paths") or "")
         self._path_mappings = parse_path_mappings(config.get("path_mappings") or "")
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
@@ -152,10 +171,16 @@ class StrmHubBridge(_PluginBase):
             return "batch"
         return "single_file"
 
+    @staticmethod
+    def _mediaserver_select_items() -> List[Dict[str, str]]:
+        services = MediaServerHelper().get_services() or {}
+        return [{"title": name, "value": name} for name in sorted(services.keys())]
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         配置页
         """
+        mediaserver_items = self._mediaserver_select_items()
         return [
             {
                 "component": "VForm",
@@ -270,6 +295,19 @@ class StrmHubBridge(_PluginBase):
                                     }
                                 ],
                             },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "media_server_refresh_enabled",
+                                            "label": "刮削后刷新媒体库（Emby 等）",
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     },
                     {
@@ -283,11 +321,73 @@ class StrmHubBridge(_PluginBase):
                                         "component": "VTextarea",
                                         "props": {
                                             "model": "path_mappings",
-                                            "label": "目录映射",
+                                            "label": "目录映射（刮削）",
                                             "rows": 3,
                                             "auto-grow": True,
                                             "placeholder": "/media/strmhub:/media/strm",
-                                            "hint": "格式：MoviePilot目录:StrmHub目录，每行一条，可多行；用于将 Webhook 返回的 strm 路径转为 MP 可访问路径（刮削）",
+                                            "hint": "格式：MoviePilot目录:StrmHub目录，每行一条；将 Webhook 返回的 strm 路径转为 MP 可访问路径",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "model": "mediaservers",
+                                            "label": "刷新的媒体服务器",
+                                            "items": mediaserver_items,
+                                            "multiple": True,
+                                            "chips": True,
+                                            "clearable": True,
+                                            "hint": "需在 MP 设置 → 媒体服务器 中预先配置 Emby/Jellyfin",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "media_server_refresh_delay",
+                                            "label": "刷新媒体库延迟（秒）",
+                                            "type": "number",
+                                            "placeholder": "刮削完成后延迟再刷新，默认 5",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextarea",
+                                        "props": {
+                                            "model": "mp_mediaserver_paths",
+                                            "label": "媒体库路径映射",
+                                            "rows": 3,
+                                            "auto-grow": True,
+                                            "placeholder": "/media/emby/strm#/media/strmhub",
+                                            "hint": "格式：媒体库目录#MoviePilot目录，每行一条；MP 与 Emby 挂载路径不一致时必填",
                                             "persistent-hint": True,
                                         },
                                     }
@@ -358,6 +458,10 @@ class StrmHubBridge(_PluginBase):
             "notify_on_strm_result": False,
             "scrape_metadata_after_strm": True,
             "scrape_overwrite": True,
+            "media_server_refresh_enabled": False,
+            "media_server_refresh_delay": 5,
+            "mediaservers": [],
+            "mp_mediaserver_paths": "",
             "path_mappings": "",
             "listen_mode": "single_file",
             "batch_debounce_seconds": 5,
@@ -582,6 +686,39 @@ class StrmHubBridge(_PluginBase):
                 f"[StrmHubBridge] 刮削汇总: 已触发={ok_count} 跳过/失败={skip_count}"
             )
 
+    def _refresh_created_strms(
+        self,
+        data: dict,
+        scrape_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        对本次新写入的 STRM 刷新 MP 已配置的媒体服务器
+        """
+        if not self._media_server_refresh_enabled:
+            return
+        context = scrape_context or {}
+        mediainfo = context.get("mediainfo")
+        results = data.get("results") or []
+        refresh_paths: List[Tuple[str, str]] = []
+        for row in results:
+            if row.get("outcome") != "created":
+                continue
+            strm_path = row.get("strm_path")
+            if not strm_path:
+                continue
+            mp_path = map_strmhub_path_to_mp(strm_path, self._path_mappings)
+            refresh_paths.append((mp_path, Path(mp_path).name))
+        if not refresh_paths:
+            return
+        helper = MediaServerRefresh(
+            "[StrmHubBridge] ",
+            enabled=True,
+            mediaservers=self._mediaservers,
+            mp_mediaserver_paths=self._mp_mediaserver_paths,
+            delay_seconds=self._media_server_refresh_delay,
+        )
+        helper.refresh_batch(refresh_paths, mediainfo=mediainfo)
+
     def _post_strm_write(
         self,
         files: List[dict],
@@ -625,6 +762,7 @@ class StrmHubBridge(_PluginBase):
                 )
                 logger.info(f"[StrmHubBridge] {summary}")
                 self._scrape_created_strms(data, scrape_context)
+                self._refresh_created_strms(data, scrape_context)
                 self._notify_strm_result(
                     ok=ok,
                     source=source,

@@ -1,5 +1,5 @@
 """
-STRM 写入后触发 MoviePilot 元数据刮削（逻辑对齐 p115strmhelper.core.scrape）
+STRM 写入后触发 MoviePilot 元数据刮削
 """
 
 from __future__ import annotations
