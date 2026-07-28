@@ -18,6 +18,7 @@ from app.plugins import _PluginBase
 from app.schemas import NotificationType
 from app.schemas import Event
 from app.schemas.types import EventType
+from .scrape import media_scrape_metadata
 
 _ALLOWED_STORAGES = frozenset({"u115", "115网盘Plus"})
 
@@ -30,7 +31,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2"
-    plugin_version = "1.3.0"
+    plugin_version = "1.4.1"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -42,9 +43,9 @@ class StrmHubBridge(_PluginBase):
     _api_token = ""
     _batch_debounce_seconds = 5
     _event_delay_seconds = 10
-    _listen_metadata_scrape = False
-    _listen_transfer_complete = True
+    _listen_mode = "single_file"
     _notify_on_strm_result = False
+    _scrape_metadata_after_strm = True
     _last_status = "尚未触发"
     _batch_timer: Optional[Timer] = None
     _debounce_lock = Lock()
@@ -64,9 +65,11 @@ class StrmHubBridge(_PluginBase):
         self._event_delay_seconds = max(
             int(delay_raw if delay_raw is not None else 10), 0
         )
-        self._listen_metadata_scrape = bool(config.get("listen_metadata_scrape", False))
-        self._listen_transfer_complete = bool(config.get("listen_transfer_complete", True))
+        self._listen_mode = self._resolve_listen_mode(config)
         self._notify_on_strm_result = bool(config.get("notify_on_strm_result", False))
+        self._scrape_metadata_after_strm = bool(
+            config.get("scrape_metadata_after_strm", True)
+        )
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
             self._last_status = saved.get("summary") or f"最近成功 ({saved.get('source', '')})"
@@ -128,6 +131,21 @@ class StrmHubBridge(_PluginBase):
                 "apikey": settings.API_TOKEN,
             },
         }
+
+    @staticmethod
+    def _resolve_listen_mode(config: dict) -> str:
+        """
+        监听模式：single_file（单文件整理）或 batch（批量整理）
+        兼容旧版 listen_transfer_complete / listen_metadata_scrape 双开关
+        """
+        mode = str(config.get("listen_mode") or "").strip()
+        if mode in ("single_file", "batch"):
+            return mode
+        if bool(config.get("listen_metadata_scrape")) and not bool(
+            config.get("listen_transfer_complete", True)
+        ):
+            return "batch"
+        return "single_file"
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -198,6 +216,47 @@ class StrmHubBridge(_PluginBase):
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "model": "listen_mode",
+                                            "label": "监听模式",
+                                            "items": [
+                                                {
+                                                    "title": "单文件整理",
+                                                    "value": "single_file",
+                                                },
+                                                {
+                                                    "title": "批量整理",
+                                                    "value": "batch",
+                                                },
+                                            ],
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "scrape_metadata_after_strm",
+                                            "label": "写 STRM 后刮削元数据（NFO/海报）",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "notify_on_strm_result",
@@ -216,43 +275,12 @@ class StrmHubBridge(_PluginBase):
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "listen_transfer_complete",
-                                            "label": "监听 transfer.complete（单文件整理完成）",
-                                        },
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "listen_metadata_scrape",
-                                            "label": "监听 metadata.scrape（整批刮削完成）",
-                                        },
-                                    }
-                                ],
-                            },
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
-                                "content": [
-                                    {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "event_delay_seconds",
-                                            "label": "事件延时（秒）",
+                                            "label": "触发延时（秒）",
                                             "type": "number",
-                                            "placeholder": "收到 MP 事件后延迟再调 Webhook，默认 10",
+                                            "placeholder": "收到整理事件后延迟再写 STRM，默认 10",
                                         },
                                     }
                                 ],
@@ -265,30 +293,14 @@ class StrmHubBridge(_PluginBase):
                                         "component": "VTextField",
                                         "props": {
                                             "model": "batch_debounce_seconds",
-                                            "label": "批写入去抖（秒）",
+                                            "label": "批量合并等待（秒）",
                                             "type": "number",
-                                            "placeholder": "metadata.scrape 路径合并，默认 5",
+                                            "placeholder": "仅批量整理：路径合并后再写，默认 5",
                                         },
                                     }
                                 ],
                             },
                         ],
-                    },
-                    {
-                        "component": "VAlert",
-                        "props": {
-                            "type": "info",
-                            "variant": "tonal",
-                            "text": "iOS 请用主屏幕 PWA 打开；测试通知请点右下角「查看数据」。",
-                        },
-                    },
-                    {
-                        "component": "VAlert",
-                        "props": {
-                            "type": "warning",
-                            "variant": "tonal",
-                            "text": "勿与其他 STRM 写入插件对同一目录双开；StrmHub 侧需已配置目录映射与 115 Cookie",
-                        },
                     },
                 ],
             }
@@ -298,8 +310,8 @@ class StrmHubBridge(_PluginBase):
             "api_token": "",
             "show_api_token": True,
             "notify_on_strm_result": False,
-            "listen_transfer_complete": True,
-            "listen_metadata_scrape": False,
+            "scrape_metadata_after_strm": True,
+            "listen_mode": "single_file",
             "batch_debounce_seconds": 5,
             "event_delay_seconds": 10,
         }
@@ -348,7 +360,7 @@ class StrmHubBridge(_PluginBase):
 
     @eventmanager.register(EventType.MetadataScrape)
     def on_metadata_scrape(self, event: Event):
-        if not self.get_state() or not self._listen_metadata_scrape:
+        if not self.get_state() or self._listen_mode != "batch":
             return
         paths = self._paths_from_scrape_event(event)
         if not paths:
@@ -357,16 +369,29 @@ class StrmHubBridge(_PluginBase):
 
     @eventmanager.register(EventType.TransferComplete)
     def on_transfer_complete(self, event: Event):
-        if not self.get_state() or not self._listen_transfer_complete:
+        if not self.get_state() or self._listen_mode != "single_file":
             return
         file_item = self._file_from_transfer_event(event)
         if not file_item:
             return
+        scrape_context = self._scrape_context_from_event(event)
         Thread(
             target=self._post_strm_write,
             args=([file_item], "mp.transfer_complete"),
+            kwargs={"scrape_context": scrape_context},
             daemon=True,
         ).start()
+
+    @staticmethod
+    def _scrape_context_from_event(event: Event) -> Dict[str, Any]:
+        """
+        从 MP 整理事件提取刮削上下文（mediainfo / meta）
+        """
+        data = event.event_data or {}
+        return {
+            "mediainfo": data.get("mediainfo"),
+            "meta": data.get("meta"),
+        }
 
     @staticmethod
     def _file_from_transfer_event(event: Event) -> Optional[dict]:
@@ -461,7 +486,54 @@ class StrmHubBridge(_PluginBase):
             logger.info(f"[StrmHubBridge] 事件延时 {delay}s 后调用 Webhook")
             sleep(delay)
 
-    def _post_strm_write(self, files: List[dict], source: str) -> None:
+    def _scrape_created_strms(
+        self,
+        data: dict,
+        scrape_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        对本次新写入的 STRM 触发 MP 元数据刮削（仅写插件日志，不发通知）
+        """
+        if not self._scrape_metadata_after_strm:
+            return
+        context = scrape_context or {}
+        mediainfo = context.get("mediainfo")
+        meta = context.get("meta")
+        results = data.get("results") or []
+        ok_count = 0
+        skip_count = 0
+        for row in results:
+            if row.get("outcome") != "created":
+                continue
+            strm_path = row.get("strm_path")
+            if not strm_path:
+                skip_count += 1
+                continue
+            try:
+                if media_scrape_metadata(
+                    path=strm_path,
+                    mediainfo=mediainfo,
+                    meta=meta,
+                ):
+                    ok_count += 1
+                else:
+                    skip_count += 1
+            except Exception as exc:
+                skip_count += 1
+                logger.warning(
+                    f"[StrmHubBridge] 刮削失败 {strm_path}: {exc}"
+                )
+        if ok_count or skip_count:
+            logger.info(
+                f"[StrmHubBridge] 刮削汇总: 已触发={ok_count} 跳过/失败={skip_count}"
+            )
+
+    def _post_strm_write(
+        self,
+        files: List[dict],
+        source: str,
+        scrape_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
         base = (self._base_url or "").rstrip("/")
         if not base or not self._api_token:
             return
@@ -498,6 +570,7 @@ class StrmHubBridge(_PluginBase):
                     },
                 )
                 logger.info(f"[StrmHubBridge] {summary}")
+                self._scrape_created_strms(data, scrape_context)
                 self._notify_strm_result(
                     ok=ok,
                     source=source,
