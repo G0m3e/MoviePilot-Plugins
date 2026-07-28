@@ -22,6 +22,7 @@ def media_scrape_metadata(
     item_name: str = "",
     mediainfo: MediaInfo | None = None,
     meta: MetaBase | None = None,
+    overwrite: bool = True,
 ) -> bool:
     """
     对本地 STRM 路径触发 MP 元数据刮削（发送 MetadataScrape 事件）
@@ -71,6 +72,7 @@ def media_scrape_metadata(
                 "meta": meta,
                 "mediainfo": mediainfo,
                 "fileitem": fileitem,
+                "overwrite": overwrite,
             },
         )
     else:
@@ -115,6 +117,7 @@ def media_scrape_metadata(
                 "meta": meta,
                 "mediainfo": mediainfo,
                 "fileitem": fileitem,
+                "overwrite": overwrite,
             },
         )
 

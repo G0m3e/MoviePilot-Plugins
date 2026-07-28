@@ -32,7 +32,7 @@ class StrmHubBridge(_PluginBase):
     plugin_name = "StrmHub 联动"
     plugin_desc = "整理完成后调用 StrmHub 直接写 STRM"
     plugin_icon = "https://raw.githubusercontent.com/G0m3e/MoviePilot-Plugins/main/icons/strmhub.png?v=2"
-    plugin_version = "1.4.2"
+    plugin_version = "1.4.3"
     plugin_author = "G0m3e"
     author_url = "https://github.com/G0m3e/StrmHub"
     plugin_config_prefix = "strmhubbridge_"
@@ -47,6 +47,7 @@ class StrmHubBridge(_PluginBase):
     _listen_mode = "single_file"
     _notify_on_strm_result = False
     _scrape_metadata_after_strm = True
+    _scrape_overwrite = True
     _path_mappings: List[Tuple[str, str]] = []
     _last_status = "尚未触发"
     _batch_timer: Optional[Timer] = None
@@ -72,6 +73,7 @@ class StrmHubBridge(_PluginBase):
         self._scrape_metadata_after_strm = bool(
             config.get("scrape_metadata_after_strm", True)
         )
+        self._scrape_overwrite = bool(config.get("scrape_overwrite", True))
         self._path_mappings = parse_path_mappings(config.get("path_mappings") or "")
         saved = self.get_data("last_trigger") or {}
         if saved.get("status") == "ok":
@@ -257,6 +259,24 @@ class StrmHubBridge(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "scrape_overwrite",
+                                            "label": "刮削时覆盖已有 NFO/图片",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
                                 "props": {"cols": 12},
                                 "content": [
                                     {
@@ -337,6 +357,7 @@ class StrmHubBridge(_PluginBase):
             "show_api_token": True,
             "notify_on_strm_result": False,
             "scrape_metadata_after_strm": True,
+            "scrape_overwrite": True,
             "path_mappings": "",
             "listen_mode": "single_file",
             "batch_debounce_seconds": 5,
@@ -546,6 +567,7 @@ class StrmHubBridge(_PluginBase):
                     path=scrape_path,
                     mediainfo=mediainfo,
                     meta=meta,
+                    overwrite=self._scrape_overwrite,
                 ):
                     ok_count += 1
                 else:
